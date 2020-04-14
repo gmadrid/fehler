@@ -7,6 +7,7 @@
 
 use proc_macro::*;
 use syn::fold::Fold;
+use syn::{ImplItemMethod, Stmt};
 
 use crate::Args;
 
@@ -23,13 +24,28 @@ impl Throws {
     pub fn fold(&mut self, input: TokenStream) -> TokenStream {
         if let Ok(item_fn) = syn::parse(input.clone()) {
             let item_fn = self.fold_item_fn(item_fn);
-            quote::quote!(#item_fn).into()
-        } else if let Ok(method) = syn::parse(input.clone()) {
-            let method = self.fold_impl_item_method(method);
-            quote::quote!(#method).into()
-        } else if let Ok(method) = syn::parse(input.clone()) {
+            return quote::quote!(#item_fn).into();
+        } else if let Ok(method) = syn::parse::<ImplItemMethod>(input.clone()) {
+            // syn will accept a fn definition with no body as ImplItemMethod, even if the
+            // definition is in a trait. Attempt to detect this case and reject it.
+            // NOTE: this is dependent on the internals of syn and how syn chooses to interpret
+            // an empty method body.
+            let mut has_body = true;
+            if method.block.stmts.len() == 1 {
+                if let Stmt::Item(_) = method.block.stmts[0] {
+                    has_body = false;
+                }
+            }
+
+            if has_body {
+                let method = self.fold_impl_item_method(method);
+                return quote::quote!(#method).into();
+            }
+        }
+
+        if let Ok(method) = syn::parse(input.clone()) {
             let method = self.fold_trait_item_method(method);
-            quote::quote!(#method).into()
+            return quote::quote!(#method).into();
         } else {
             panic!("#[throws] attribute can only be applied to functions and methods")
         }
